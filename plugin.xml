@@ -15,7 +15,7 @@
  
         <config-file target="res/xml/config.xml" parent="/*">
             <feature name="AmapLocation">
-                <param name="android-package" value="me.duduche.cordova.plugins.amaplocation"/>
+                <param name="android-package" value="me.duduche.cordova.plugins.amaplocation.AmapLocation"/>
             </feature>
         </config-file> 
         

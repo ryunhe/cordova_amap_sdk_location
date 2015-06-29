@@ -1,8 +1,14 @@
 package me.duduche.cordova.plugins.amaplocation;
 
 
-import java.util.HashMap;
-import java.util.Map;
+import android.location.Location;
+import android.os.Bundle;
+import android.util.Log;
+
+import com.amap.api.location.AMapLocation;
+import com.amap.api.location.AMapLocationListener;
+import com.amap.api.location.LocationManagerProxy;
+import com.amap.api.location.LocationProviderProxy;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
@@ -11,41 +17,14 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import android.util.Log;
-
-public class AmapLocation extends CordovaPlugin {
+public class AmapLocation extends CordovaPlugin implements AMapLocationListener {
 
 	private static final String STOP_ACTION = "stop";
 	private static final String GET_ACTION = "getCurrentPosition";
-	public LocationClient locationClient = null;
-	public JSONObject jsonObj = new JSONObject();
 	public boolean result = false;
-	public CallbackContext callbackContext;
-
-	public BDLocationListener myListener;
-
-	private static final Map<Integer, String> ERROR_MESSAGE_MAP = new HashMap<Integer, String>();
-
-	private static final String DEFAULT_ERROR_MESSAGE = "服务端定位失败";
-
-	static {
-		ERROR_MESSAGE_MAP.put(61, "GPS定位结果");
-		ERROR_MESSAGE_MAP.put(62, "扫描整合定位依据失败。此时定位结果无效");
-		ERROR_MESSAGE_MAP.put(63, "网络异常，没有成功向服务器发起请求。此时定位结果无效");
-		ERROR_MESSAGE_MAP.put(65, "定位缓存的结果");
-		ERROR_MESSAGE_MAP.put(66, "离线定位结果。通过requestOfflineLocaiton调用时对应的返回结果");
-		ERROR_MESSAGE_MAP.put(67, "离线定位失败。通过requestOfflineLocaiton调用时对应的返回结果");
-		ERROR_MESSAGE_MAP.put(68, "网络连接失败时，查找本地离线定位时对应的返回结果。");
-		ERROR_MESSAGE_MAP.put(161, "表示网络定位结果");
-	};
-
-	public String getErrorMessage(int locationType) {
-		String result = ERROR_MESSAGE_MAP.get(locationType);
-		if (result == null) {
-			result = DEFAULT_ERROR_MESSAGE;
-		}
-		return result;
-	}
+	CallbackContext callbackContext;
+	LocationManagerProxy mLocationManagerProxy;
+	JSONObject jsonObj = new JSONObject();
 
 	@Override
 	public boolean execute(String action, JSONArray args,
@@ -55,34 +34,23 @@ public class AmapLocation extends CordovaPlugin {
 			cordova.getActivity().runOnUiThread(new Runnable() {
 				@Override
 				public void run() {
-					locationClient = new LocationClient(cordova.getActivity());
-					locationClient.setAK("BfkPvjDGHC0ATZhIr6wxnHh9");//设置百度的ak
-					myListener = new MyLocationListener();
-					locationClient.registerLocationListener(myListener);
-					LocationClientOption option = new LocationClientOption();
-					option.setOpenGps(true);
-					option.setCoorType("bd09ll");// 返回的定位结果是百度经纬度，默认值gcj02
-					option.setProdName("BaiduLoc");
-					option.disableCache(true);// 禁止启用缓存定位
-					locationClient.setLocOption(option);
+					mLocationManagerProxy = LocationManagerProxy.getInstance(cordova.getActivity());
+					mLocationManagerProxy.requestLocationData(LocationProviderProxy.AMapNetwork, 10*1000, 10, AmapLocation.this);
 
-					locationClient.start();
-					locationClient.requestLocation();
-
+					mLocationManagerProxy.setGpsEnable(false);
 				}
 
 			});
 			return true;
 		} else if (STOP_ACTION.equals(action)) {
-			locationClient.stop();
+			stopLocation();
 			callbackContext.success(200);
 			return true;
 		} else {
-			callbackContext
-					.error(PluginResult.Status.INVALID_ACTION.toString());
+			callbackContext.error(PluginResult.Status.INVALID_ACTION.toString());
 		}
 
-		while (result == false) {
+		while (!result) {
 			try {
 				Thread.sleep(100);
 			} catch (InterruptedException e) {
@@ -92,65 +60,18 @@ public class AmapLocation extends CordovaPlugin {
 		return result;
 	}
 
-	public class MyLocationListener implements BDLocationListener {
-		@Override
-		public void onReceiveLocation(BDLocation location) {
-			if (location == null)
-				return;
-			try {
-				JSONObject coords = new JSONObject();
-				coords.put("latitude", location.getLatitude());
-				coords.put("longitude", location.getLongitude());
-				coords.put("radius", location.getRadius());
-
-				jsonObj.put("coords", coords);
-
-				int locationType = location.getLocType();
-
-				jsonObj.put("locationType", locationType);
-				jsonObj.put("code", locationType);
-				jsonObj.put("message", getErrorMessage(locationType));
-
-				switch (location.getLocType()) {
-
-				case BDLocation.TypeGpsLocation:
-					coords.put("speed", location.getSpeed());
-					coords.put("altitude", location.getAltitude());
-					jsonObj.put("SatelliteNumber",
-							location.getSatelliteNumber());
-					break;
-
-				case BDLocation.TypeNetWorkLocation:
-					jsonObj.put("addr", location.getAddrStr());
-					break;
-				}
-
-				Log.d("BaiduLocationPlugin", "run: " + jsonObj.toString());
-				callbackContext.success(jsonObj);
-				result = true;
-			} catch (JSONException e) {
-				callbackContext.error(e.getMessage());
-				result = true;
-			}
-
+	private void stopLocation() {
+		if (mLocationManagerProxy != null) {
+			mLocationManagerProxy.removeUpdates(this);
+			mLocationManagerProxy.destory();
 		}
-
-		public void onReceivePoi(BDLocation poiLocation) {
-			// TODO Auto-generated method stub
-		}
+		mLocationManagerProxy = null;
 	}
 
 	@Override
 	public void onDestroy() {
-		if (locationClient != null && locationClient.isStarted()) {
-			locationClient.stop();
-			locationClient = null;
-		}
+		stopLocation();
 		super.onDestroy();
-	}
-
-	private void logMsg(String s) {
-		System.out.println(s);
 	}
 
 	public CallbackContext getCallbackContext() {
@@ -159,5 +80,52 @@ public class AmapLocation extends CordovaPlugin {
 
 	public void setCallbackContext(CallbackContext callbackContext) {
 		this.callbackContext = callbackContext;
+	}
+
+	@Override
+	public void onLocationChanged(AMapLocation aMapLocation) {
+		if(aMapLocation != null && aMapLocation.getAMapException().getErrorCode() == 0) {
+			//获取位置信息
+			Double geoLat = aMapLocation.getLatitude();
+			Double geoLng = aMapLocation.getLongitude();
+
+			try {
+				JSONObject position = new JSONObject();
+				position.put("lat", aMapLocation.getLatitude());
+				position.put("lng", aMapLocation.getLongitude());
+
+				jsonObj.put("position", position);
+				jsonObj.put("accuracy", aMapLocation.getAccuracy());
+
+				Log.d("AmapLocationPlugin", "run: " + jsonObj.toString());
+
+				callbackContext.success(jsonObj);
+				result = true;
+			} catch (JSONException e) {
+				callbackContext.error(e.getMessage());
+				result = true;
+			}
+
+		}
+	}
+
+	@Override
+	public void onLocationChanged(Location location) {
+
+	}
+
+	@Override
+	public void onStatusChanged(String s, int i, Bundle bundle) {
+
+	}
+
+	@Override
+	public void onProviderEnabled(String s) {
+
+	}
+
+	@Override
+	public void onProviderDisabled(String s) {
+
 	}
 }
